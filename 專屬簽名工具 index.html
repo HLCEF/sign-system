@@ -5,18 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>基金會公文核章系統</title>
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://accounts.google.com/gsi/client" onload="initGoogleSignIn()" async defer></script>
+    
     <style>
         :root { --primary: #1a73e8; --success: #34a853; }
         body { font-family: "Microsoft JhengHei", sans-serif; background: #f8f9fa; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .container { background: white; width: 100%; max-width: 500px; padding: 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
         .header { text-align: center; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px; margin-bottom: 25px; }
-        #google_signin_wrapper { display: flex; justify-content: center; margin-bottom: 20px; }
+        #google_signin_wrapper { display: flex; justify-content: center; margin-bottom: 20px; min-height: 40px; }
         #userProfile { text-align: center; margin-bottom: 20px; font-weight: bold; color: var(--primary); min-height: 24px; }
         .step-box { display: none; text-align: center; }
         .active { display: block; }
-        .sig-preview-wrapper { margin: 15px 0; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
-        #sigPreview { max-width: 150px; display: block; margin: 0 auto; background: #fdfdfd; }
+        .sig-preview-wrapper { margin: 15px 0; border: 1px solid #eee; padding: 10px; border-radius: 8px; background: #fff; }
+        #sigPreview { max-width: 150px; display: block; margin: 0 auto; }
         .upload-zone { border: 2px dashed var(--primary); background: #f1f7ff; padding: 40px 20px; border-radius: 12px; cursor: pointer; margin: 20px 0; }
         .btn { width: 100%; padding: 16px; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
         .btn-primary { background: var(--primary); color: white; }
@@ -35,7 +36,7 @@
         </div>
     </div>
 
-    <div id="userProfile">請先登入 Google 帳號</div>
+    <div id="userProfile">正在準備 Google 登入...</div>
 
     <div id="stepInit" class="step-box">
         <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
@@ -47,10 +48,11 @@
 
     <div id="stepApp" class="step-box">
         <div class="sig-preview-wrapper">
+            <span style="font-size: 12px; color: #999;">目前使用的簽名圖案：</span>
             <img id="sigPreview" src="" alt="簽名預覽">
         </div>
         <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
-            <p id="fileName">📂 點擊選取待簽 PDF (支援多檔)</p>
+            <p id="fileName">📂 點擊選取待簽 PDF (可多選)</p>
             <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none">
         </div>
         <div id="fileList"></div>
@@ -60,35 +62,34 @@
 </div>
 
 <script>
+    // --- 2. 核心配置 ---
     const CONFIG = {
         CLIENT_ID: "285014596888-r1heqas9q4tptdqm4qsr9rhle5rkejcl.apps.googleusercontent.com",
         GAS_URL: "https://script.google.com/macros/s/AKfycby0sZfRYWh6MRi2jZVAjdl1FA6XdPGHUCiyj4BsuDRmZJYJMXNds2THa-ioQme9ksE/exec",
-        WHITE_THRESHOLD: 200
+        WHITE_THRESHOLD: 200 // 數字越小，去背越強
     };
 
     let currentUserEmail = null;
     let selectedFiles = [];
 
-    // 初始化 Google SSO 並強制選擇帳號
-    window.onload = function () {
-        if (window.location.protocol === 'file:') {
-            document.getElementById('status').innerHTML = "❌ 偵測到本地開啟。請注意：Google 登入不支援 file:// 協議，請上傳至 GitHub 或使用本地伺服器測試。";
-        }
-
+    // --- 3. Google SSO 邏輯 ---
+    function initGoogleSignIn() {
         google.accounts.id.initialize({
             client_id: CONFIG.CLIENT_ID,
             callback: handleSignIn,
             auto_select: false,
-            prompt: "select_account" // 強制彈出帳號選擇
+            prompt: "select_account"
         });
 
         google.accounts.id.renderButton(
             document.getElementById("google_signin_button"),
             { theme: "outline", size: "large", text: "signin_with" }
         );
-    };
+        document.getElementById('userProfile').innerText = "請先登入 Google 帳號";
+    }
 
     function handleSignIn(response) {
+        // 解碼 JWT 取得使用者資訊
         const payload = JSON.parse(atob(response.credential.split('.')[1]));
         currentUserEmail = payload.email;
         document.getElementById('userProfile').innerHTML = `<span>👤 使用者：${payload.name}</span>`;
@@ -96,6 +97,7 @@
         checkUserStatus();
     }
 
+    // --- 4. 簽名檔狀態管理 ---
     function checkUserStatus() {
         const savedSig = localStorage.getItem(`sig_${currentUserEmail}`);
         const stepInit = document.getElementById('stepInit');
@@ -111,11 +113,12 @@
         }
     }
 
-    // --- 自動去背模組 ---
+    // --- 5. 自動去背處理 ---
     document.getElementById('sigInput').onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        document.getElementById('status').innerText = "⏳ 正在自動去背...";
+        document.getElementById('status').innerText = "⏳ 正在處理影像...";
+
         const reader = new FileReader();
         reader.onload = (event) => {
             const img = new Image();
@@ -124,53 +127,73 @@
                 const ctx = canvas.getContext('2d');
                 canvas.width = img.width; canvas.height = img.height;
                 ctx.drawImage(img, 0, 0);
+                
                 const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 for (let i = 0; i < imgData.data.length; i += 4) {
-                    if (imgData.data[i] > CONFIG.WHITE_THRESHOLD && imgData.data[i+1] > CONFIG.WHITE_THRESHOLD && imgData.data[i+2] > CONFIG.WHITE_THRESHOLD) {
-                        imgData.data[i+3] = 0;
+                    // RGB 判定
+                    const r = imgData.data[i];
+                    const g = imgData.data[i+1];
+                    const b = imgData.data[i+2];
+                    if (r > CONFIG.WHITE_THRESHOLD && g > CONFIG.WHITE_THRESHOLD && b > CONFIG.WHITE_THRESHOLD) {
+                        imgData.data[i+3] = 0; // 透明
                     }
                 }
                 ctx.putImageData(imgData, 0, 0);
                 localStorage.setItem(`sig_${currentUserEmail}`, canvas.toDataURL("image/png"));
                 checkUserStatus();
-                document.getElementById('status').innerText = "✅ 簽名已就緒";
+                document.getElementById('status').innerText = "✅ 簽名設定完成";
             };
             img.src = event.target.result;
         };
         reader.readAsDataURL(file);
     };
 
-    // --- PDF 簽署與連動 ---
+    // --- 6. PDF 簽署與下載 ---
     document.getElementById('fileInput').onchange = (e) => {
         selectedFiles = Array.from(e.target.files);
         const list = document.getElementById('fileList');
         if (selectedFiles.length > 0) {
             list.style.display = 'block';
             list.innerHTML = selectedFiles.map(f => `• ${f.name}`).join('<br>');
-            document.getElementById('fileName').innerText = `已選取 ${selectedFiles.length} 份`;
+            document.getElementById('fileName').innerText = `已選取 ${selectedFiles.length} 份文件`;
         }
     };
 
     async function processAllFiles() {
         const status = document.getElementById('status');
         const sigBase64 = localStorage.getItem(`sig_${currentUserEmail}`);
+        if (!sigBase64) return alert("請先設定簽名檔");
+
         const sigBytes = await fetch(sigBase64).then(res => res.arrayBuffer());
 
         for (const file of selectedFiles) {
-            const pdfDoc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
-            const sigImg = await pdfDoc.embedPng(sigBytes);
-            pdfDoc.getPages()[0].drawImage(sigImg, { x: 450, y: 100, width: 100, height: 50 });
+            status.innerText = `🔄 處理中: ${file.name}`;
+            try {
+                const pdfDoc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+                const sigImg = await pdfDoc.embedPng(sigBytes);
+                // 預設簽名位置 (右下)
+                pdfDoc.getPages()[0].drawImage(sigImg, { x: 450, y: 100, width: 100, height: 50 });
 
-            const serial = "F-" + Date.now().toString().slice(-6);
-            const pdfBytes = await pdfDoc.save();
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(new Blob([pdfBytes], {type: "application/pdf"}));
-            link.download = `${serial}_${file.name}`;
-            link.click();
+                const pdfBytes = await pdfDoc.save();
+                const serial = "F-" + Date.now().toString().slice(-6);
+                
+                // 下載檔案
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob([pdfBytes], {type: "application/pdf"}));
+                link.download = `${serial}_${file.name}`;
+                link.click();
 
-            fetch(CONFIG.GAS_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ serial, user: currentUserEmail, file: file.name }) });
+                // 同步 GAS (不等待結果)
+                fetch(CONFIG.GAS_URL, { 
+                    method: "POST", 
+                    mode: "no-cors", 
+                    body: JSON.stringify({ serial, user: currentUserEmail, file: file.name, date: new Date().toLocaleString() }) 
+                });
+            } catch (err) {
+                console.error(err);
+            }
         }
-        status.innerText = "✅ 簽署並記帳完成！";
+        status.innerText = "✅ 簽署完成！請檢查下載清單。";
     }
 </script>
 </body>
